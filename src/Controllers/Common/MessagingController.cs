@@ -6,8 +6,7 @@ using sodoff.Attributes;
 
 namespace sodoff.Controllers.Common;
 
-[ApiController]
-public class MessagingController : ControllerBase
+public class MessagingController : Controller
 {
     [HttpGet, HttpPost]
     [Produces("application/xml")]
@@ -67,7 +66,13 @@ public class MessagingController : ControllerBase
         }
 
         var dbMessages = ctx.Messages.ToList();
+        var userStates = ctx.UserMessageQueues.Where(q => q.VikingId == viking.Id).ToDictionary(q => q.MessageId);
+        
         foreach (var msg in dbMessages) {
+            if (userStates.TryGetValue(msg.Id, out var state) && state.IsDeleted) {
+                continue; // Skip messages deleted by this user
+            }
+
             var boardMsg = new sodoff.Schema.Message {
                 MessageID = msg.Id,
                 Creator = "00000000-0000-0000-0000-000000000000",
@@ -88,6 +93,28 @@ public class MessagingController : ControllerBase
         xml = xml.Replace(" xmlns=\"http://api.jumpstart.com/\"", "");
 
         return Content(xml, "application/xml");
+    }
+
+    [HttpPost]
+    [Produces("application/xml")]
+    [Route("MessageWebService.asmx/RemoveMessageFromBoard")]
+    [VikingSession]
+    public IActionResult RemoveMessageFromBoard([FromForm] int messageID, Viking viking, [FromServices] DBContext ctx)
+    {
+        var state = ctx.UserMessageQueues.FirstOrDefault(q => q.MessageId == messageID && q.VikingId == viking.Id);
+        if (state != null) {
+            state.IsDeleted = true;
+        } else {
+            state = new UserMessageQueue {
+                VikingId = viking.Id,
+                MessageId = messageID,
+                IsRead = true,
+                IsDeleted = true
+            };
+            ctx.UserMessageQueues.Add(state);
+        }
+        ctx.SaveChanges();
+        return Ok(true);
     }
 
     private string SerializeToXml<T>(T obj)
@@ -141,8 +168,8 @@ public class MessagingController : ControllerBase
                 FromUserID = req.Buddy.Uid.ToString(),
                 MessageTypeID = 5,
                 MessageTypeName = "Buddy Request",
-                MemberMessage = "[[Line1]]=[[Wants to be your buddy!]]",
-                NonMemberMessage = "[[Line1]]=[[Wants to be your buddy!]]"
+                MemberMessage = $"[[Line1]]=[[{req.Buddy.Name} wants to be your buddy!]]",
+                NonMemberMessage = $"[[Line1]]=[[{req.Buddy.Name} wants to be your buddy!]]"
             });
         }
 
