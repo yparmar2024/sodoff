@@ -1771,6 +1771,8 @@ public class ContentController : Controller {
     [Route("ContentWebService.asmx/GetDisplayNameByUserId")] // used by World Of Jumpstart
     public IActionResult GetDisplayNameByUserId([FromForm] Guid userId)
     {
+        if (userId == Guid.Empty) return Ok("System");
+        
         Viking? idViking = ctx.Vikings.FirstOrDefault(e => e.Uid == userId);
         if (idViking is null) return Ok("???");
 

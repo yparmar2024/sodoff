@@ -53,6 +53,7 @@ public class Viking {
     public virtual ICollection<UserMissionData> UserMissions { get; set; } = null!;
     public virtual ICollection<UserBadgeCompleteData> UserBadgesCompleted { get; set; } = null!;
     public virtual ICollection<BuddyRelationship> BuddyRelationships { get; set; } = null!;
+    public virtual ICollection<UserMessageQueue> UserMessageQueues { get; set; } = null!;
 
     public DateTime? CreationDate { get; set; }
     public DateTime? BirthDate { get; set; }

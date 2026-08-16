@@ -37,6 +37,8 @@ public class DBContext : DbContext {
     public DbSet<UserMissionData> UserMissionData { get; set; } = null!;
     public DbSet<UserBadgeCompleteData> UserBadgesCompleted { get; set; } = null!;
     public DbSet<BuddyRelationship> BuddyRelationships { get; set; } = null!;
+    public DbSet<Message> Messages { get; set; } = null!;
+    public DbSet<UserMessageQueue> UserMessageQueues { get; set; } = null!;
 
     private readonly IOptions<ApiServerConfig> config;
 
