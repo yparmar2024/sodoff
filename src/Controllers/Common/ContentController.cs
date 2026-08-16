@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 using sodoff.Attributes;
@@ -1184,9 +1184,237 @@ public class ContentController : Controller {
     [HttpPost]
     [Produces("application/xml")]
     [Route("ContentWebService.asmx/GetBuddyList")]
-    public IActionResult GetBuddyList() {
-        // TODO: this is a placeholder
-        return Ok(new BuddyList { Buddy = new Buddy[0] });
+    [VikingSession]
+    public IActionResult GetBuddyList(Viking viking) {
+        var relationships = ctx.BuddyRelationships
+            .Include(b => b.Viking)
+            .Include(b => b.Buddy)
+            .Where(b => b.VikingId == viking.Id || b.BuddyId == viking.Id)
+            .ToList();
+
+        var buddies = new List<Buddy>();
+        foreach (var rel in relationships) {
+            bool isOutgoing = rel.VikingId == viking.Id;
+            var friendViking = isOutgoing ? rel.Buddy : rel.Viking;
+
+            BuddyStatus displayStatus = BuddyStatus.Unknown;
+            if (rel.Status == BuddyStatus.Approved) {
+                displayStatus = BuddyStatus.Approved;
+            } else if (rel.Status == BuddyStatus.PendingApprovalFromOther) {
+                displayStatus = isOutgoing ? BuddyStatus.PendingApprovalFromOther : BuddyStatus.PendingApprovalFromSelf;
+            } else if (rel.Status == BuddyStatus.PendingApprovalFromSelf) {
+                displayStatus = isOutgoing ? BuddyStatus.PendingApprovalFromSelf : BuddyStatus.PendingApprovalFromOther;
+            } else if (rel.Status == BuddyStatus.BlockedByBoth) {
+                displayStatus = BuddyStatus.BlockedByBoth;
+            } else if (rel.Status == BuddyStatus.BlockedByOther) {
+                displayStatus = isOutgoing ? BuddyStatus.BlockedByOther : BuddyStatus.BlockedBySelf;
+            } else if (rel.Status == BuddyStatus.BlockedBySelf) {
+                displayStatus = isOutgoing ? BuddyStatus.BlockedBySelf : BuddyStatus.BlockedByOther;
+            }
+
+            buddies.Add(new Buddy {
+                UserID = friendViking.Uid.ToString(),
+                DisplayName = friendViking.Name,
+                Status = displayStatus,
+                CreateDate = rel.CreateDate,
+                Online = true,
+                OnMobile = false,
+                BestBuddy = rel.BestBuddy
+            });
+        }
+        return Ok(new BuddyList { Buddy = buddies.ToArray() });
+    }
+
+    [HttpPost]
+    [Produces("application/xml")]
+    [Route("ContentWebService.asmx/AddBuddy")]
+    [VikingSession]
+    public IActionResult AddBuddy(Viking viking, [FromForm] string buddyUserID) {
+        if (!Guid.TryParse(buddyUserID, out Guid buddyUid)) {
+            return Ok(new BuddyActionResult { Result = BuddyActionResultType.Unknown });
+        }
+
+        var buddyViking = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
+        if (buddyViking == null) {
+            return Ok(new BuddyActionResult { Result = BuddyActionResultType.Unknown });
+        }
+
+        if (buddyViking.Id == viking.Id) {
+            return Ok(new BuddyActionResult { Result = BuddyActionResultType.CannotAddSelf });
+        }
+
+        var existing = ctx.BuddyRelationships.FirstOrDefault(b => 
+            (b.VikingId == viking.Id && b.BuddyId == buddyViking.Id) ||
+            (b.VikingId == buddyViking.Id && b.BuddyId == viking.Id));
+
+        if (existing != null) {
+            return Ok(new BuddyActionResult { Result = BuddyActionResultType.AlreadyInList });
+        }
+
+        var relationship = new BuddyRelationship {
+            VikingId = viking.Id,
+            BuddyId = buddyViking.Id,
+            Status = BuddyStatus.PendingApprovalFromOther,
+            CreateDate = DateTime.UtcNow,
+            BestBuddy = false
+        };
+
+        ctx.BuddyRelationships.Add(relationship);
+        ctx.SaveChanges();
+
+        return Ok(new BuddyActionResult { Result = BuddyActionResultType.Success, Status = relationship.Status, BuddyUserID = buddyViking.Uid.ToString() });
+    }
+
+    [HttpGet, HttpPost]
+    [Produces("application/xml")]
+    [Route("ContentWebService.asmx/GetFriendCode")]
+    [VikingSession]
+    public IActionResult GetFriendCode(Viking viking) {
+        // Friend code is the first 6 chars of the Guid uppercase
+        string friendCode = viking.Uid.ToString().Substring(0, 6).ToUpper();
+        return Ok(friendCode);
+    }
+
+    [HttpPost]
+    [Produces("application/xml")]
+    [Route("ContentWebService.asmx/AddBuddyByFriendCode")]
+    [VikingSession]
+    public IActionResult AddBuddyByFriendCode(Viking viking, [FromForm] string friendCode) {
+        if (string.IsNullOrEmpty(friendCode)) {
+            return Ok(new BuddyActionResult { Result = BuddyActionResultType.InvalidFriendCode });
+        }
+
+        // Find the buddy whose Uid starts with the friendCode
+        var buddyViking = ctx.Vikings.ToList().FirstOrDefault(v => v.Uid.ToString().StartsWith(friendCode.ToLower()));
+        if (buddyViking == null) {
+            return Ok(new BuddyActionResult { Result = BuddyActionResultType.InvalidFriendCode });
+        }
+
+        if (buddyViking.Id == viking.Id) {
+            return Ok(new BuddyActionResult { Result = BuddyActionResultType.CannotAddSelf });
+        }
+
+        var existing = ctx.BuddyRelationships.FirstOrDefault(b => 
+            (b.VikingId == viking.Id && b.BuddyId == buddyViking.Id) ||
+            (b.VikingId == buddyViking.Id && b.BuddyId == viking.Id));
+
+        if (existing != null) {
+            return Ok(new BuddyActionResult { Result = BuddyActionResultType.AlreadyInList });
+        }
+
+        var relationship = new BuddyRelationship {
+            VikingId = viking.Id,
+            BuddyId = buddyViking.Id,
+            Status = BuddyStatus.PendingApprovalFromOther,
+            CreateDate = DateTime.UtcNow,
+            BestBuddy = false
+        };
+
+        ctx.BuddyRelationships.Add(relationship);
+        ctx.SaveChanges();
+
+        return Ok(new BuddyActionResult { Result = BuddyActionResultType.Success, Status = relationship.Status, BuddyUserID = buddyViking.Uid.ToString() });
+    }
+
+    [HttpPost]
+    [Produces("application/xml")]
+    [Route("ContentWebService.asmx/UpdateBestBuddy")]
+    [VikingSession]
+    public IActionResult UpdateBestBuddy([FromForm] string buddyUserID, [FromForm] bool bestBuddy, Viking viking) {
+        if (!Guid.TryParse(buddyUserID, out Guid buddyUid)) return Ok(false);
+        var buddy = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
+        if (buddy == null) return Ok(false);
+
+        var rel = ctx.BuddyRelationships.FirstOrDefault(b => 
+            (b.VikingId == viking.Id && b.BuddyId == buddy.Id) || 
+            (b.VikingId == buddy.Id && b.BuddyId == viking.Id)
+        );
+
+        if (rel != null) {
+            rel.BestBuddy = bestBuddy;
+            ctx.SaveChanges();
+            return Ok(true);
+        }
+        
+        return Ok(false);
+    }
+
+    [HttpPost]
+    [Produces("application/xml")]
+    [Route("ContentWebService.asmx/ApproveBuddy")]
+    [VikingSession]
+    public IActionResult ApproveBuddy([FromForm] string buddyUserID, Viking viking) {
+        if (!Guid.TryParse(buddyUserID, out Guid buddyUid)) return Ok(false);
+        var buddy = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
+        if (buddy == null) return Ok(false);
+
+        var rel = ctx.BuddyRelationships.FirstOrDefault(b => 
+            (b.VikingId == viking.Id && b.BuddyId == buddy.Id) || 
+            (b.VikingId == buddy.Id && b.BuddyId == viking.Id)
+        );
+
+        if (rel != null && rel.Status == BuddyStatus.PendingApprovalFromOther) {
+            rel.Status = BuddyStatus.Approved;
+            ctx.SaveChanges();
+            return Ok(true);
+        }
+        
+        return Ok(false);
+    }
+
+    [HttpPost]
+    [Produces("application/xml")]
+    [Route("ContentWebService.asmx/RemoveBuddy")]
+    [VikingSession]
+    public IActionResult RemoveBuddy([FromForm] string buddyUserID, Viking viking) {
+        if (!Guid.TryParse(buddyUserID, out Guid buddyUid)) return Ok(false);
+        var buddy = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
+        if (buddy == null) return Ok(false);
+
+        var rel = ctx.BuddyRelationships.FirstOrDefault(b => 
+            (b.VikingId == viking.Id && b.BuddyId == buddy.Id) || 
+            (b.VikingId == buddy.Id && b.BuddyId == viking.Id)
+        );
+
+        if (rel != null) {
+            ctx.BuddyRelationships.Remove(rel);
+            ctx.SaveChanges();
+            return Ok(true);
+        }
+        
+        return Ok(false);
+    }
+
+    [HttpGet, HttpPost]
+    [Produces("application/xml")]
+    [Route("ContentWebService.asmx/BlockBuddy")]
+    [VikingSession]
+    public IActionResult BlockBuddy(string buddyUserID, Viking viking) {
+        if (!Guid.TryParse(buddyUserID, out Guid buddyUid)) return Ok(false);
+        var buddy = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
+        if (buddy == null) return Ok(false);
+
+        var rel = ctx.BuddyRelationships.FirstOrDefault(b => 
+            (b.VikingId == viking.Id && b.BuddyId == buddy.Id) || 
+            (b.VikingId == buddy.Id && b.BuddyId == viking.Id)
+        );
+
+        if (rel != null) {
+            ctx.BuddyRelationships.Remove(rel);
+            ctx.SaveChanges();
+        }
+
+        var blockedRel = new BuddyRelationship {
+            VikingId = viking.Id,
+            BuddyId = buddy.Id,
+            Status = BuddyStatus.BlockedBySelf,
+            CreateDate = DateTime.UtcNow,
+            BestBuddy = false
+        };
+        ctx.BuddyRelationships.Add(blockedRel);
+        ctx.SaveChanges();
+        
+        return Ok(true);
     }
 
     [HttpPost]

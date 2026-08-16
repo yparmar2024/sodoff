@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using sodoff.Configuration;
 using System.Text.Json;
@@ -36,6 +36,7 @@ public class DBContext : DbContext {
     public DbSet<RatingRank> RatingRanks { get; set; } = null!;
     public DbSet<UserMissionData> UserMissionData { get; set; } = null!;
     public DbSet<UserBadgeCompleteData> UserBadgesCompleted { get; set; } = null!;
+    public DbSet<BuddyRelationship> BuddyRelationships { get; set; } = null!;
 
     private readonly IOptions<ApiServerConfig> config;
 
@@ -72,6 +73,14 @@ public class DBContext : DbContext {
     }
 
     protected override void OnModelCreating(ModelBuilder builder) {
+        builder.Entity<BuddyRelationship>().HasKey(e => new { e.VikingId, e.BuddyId });
+        builder.Entity<BuddyRelationship>().HasOne(e => e.Viking)
+            .WithMany(v => v.BuddyRelationships)
+            .HasForeignKey(e => e.VikingId);
+        builder.Entity<BuddyRelationship>().HasOne(e => e.Buddy)
+            .WithMany()
+            .HasForeignKey(e => e.BuddyId);
+
         builder.Entity<GroupMember>().HasKey(["VikingID", "GroupID"]);
         builder.Entity<GroupJoinRequest>().HasKey(["VikingID", "GroupID"]);
 

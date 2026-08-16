@@ -1,15 +1,33 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using sodoff.Attributes;
+using sodoff.Model;
 using sodoff.Schema;
 
 namespace sodoff.Controllers.Common;
 public class MessagingController : Controller {
 
-    [HttpPost]
+    [HttpGet, HttpPost]
     [Produces("application/xml")]
     [Route("MessagingWebService.asmx/GetUserMessageQueue")]
-    public ArrayOfMessageInfo? GetUserMessageQueue() {
-        // TODO: this is a placeholder
-        return null;
+    [VikingSession]
+    public IActionResult GetUserMessageQueue(Viking viking, [FromServices] DBContext ctx) {
+        var requests = ctx.BuddyRelationships
+            .Include(b => b.Viking)
+            .Where(b => b.BuddyId == viking.Id && b.Status == BuddyStatus.PendingApprovalFromOther)
+            .ToList();
+            
+        var messages = new List<MessageInfo>();
+        foreach (var req in requests) {
+            messages.Add(new MessageInfo {
+                MessageID = req.VikingId, // hack: use VikingId as MessageID
+                FromUserID = req.Viking.Uid.ToString(),
+                MessageTypeID = 5,
+                MessageTypeName = "Buddy Request"
+            });
+        }
+        
+        return Ok(new ArrayOfMessageInfo { MessageInfo = messages.ToArray() });
     }
 
     [HttpPost]
@@ -35,5 +53,30 @@ public class MessagingController : Controller {
     {
         // TODO - placeholder
         return Ok(new ArrayOfMessageInfo());
+    }
+
+    [HttpPost]
+    [Produces("application/xml")]
+    [Route("MessageWebService.asmx/GetMessageBoard")]
+    [VikingSession]
+    public IActionResult GetMessageBoard(Viking viking, [FromServices] DBContext ctx)
+    {
+        // Mock friend requests from the BuddyRelationships table
+        var requests = ctx.BuddyRelationships
+            .Include(b => b.Viking)
+            .Where(b => b.BuddyId == viking.Id && b.Status == BuddyStatus.PendingApprovalFromOther)
+            .ToList();
+            
+        var messages = new List<MessageInfo>();
+        foreach (var req in requests) {
+            messages.Add(new MessageInfo {
+                MessageID = req.VikingId, // hack: use VikingId as MessageID so we know who it is
+                FromUserID = req.Viking.Uid.ToString(),
+                MessageTypeID = 5,
+                MessageTypeName = "Buddy Request"
+            });
+        }
+        
+        return Ok(new ArrayOfMessageInfo { MessageInfo = messages.ToArray() });
     }
 }
