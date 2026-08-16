@@ -13,15 +13,15 @@ public class MessagingController : Controller {
     [VikingSession]
     public IActionResult GetUserMessageQueue(Viking viking, [FromServices] DBContext ctx) {
         var requests = ctx.BuddyRelationships
-            .Include(b => b.Viking)
-            .Where(b => b.BuddyId == viking.Id && b.Status == BuddyStatus.PendingApprovalFromOther)
+            .Include(b => b.Buddy)
+            .Where(b => b.VikingId == viking.Id && b.Status == BuddyStatus.PendingApprovalFromSelf)
             .ToList();
             
         var messages = new List<MessageInfo>();
         foreach (var req in requests) {
             messages.Add(new MessageInfo {
-                MessageID = req.VikingId, // hack: use VikingId as MessageID
-                FromUserID = req.Viking.Uid.ToString(),
+                MessageID = req.BuddyId, // hack: use BuddyId (sender) as MessageID
+                FromUserID = req.Buddy.Uid.ToString(),
                 MessageTypeID = 5,
                 MessageTypeName = "Buddy Request"
             });
@@ -63,15 +63,15 @@ public class MessagingController : Controller {
     {
         // Mock friend requests from the BuddyRelationships table
         var requests = ctx.BuddyRelationships
-            .Include(b => b.Viking)
-            .Where(b => b.BuddyId == viking.Id && b.Status == BuddyStatus.PendingApprovalFromOther)
+            .Include(b => b.Buddy)
+            .Where(b => b.VikingId == viking.Id && b.Status == BuddyStatus.PendingApprovalFromSelf)
             .ToList();
             
         var messages = new List<MessageInfo>();
         foreach (var req in requests) {
             messages.Add(new MessageInfo {
-                MessageID = req.VikingId, // hack: use VikingId as MessageID so we know who it is
-                FromUserID = req.Viking.Uid.ToString(),
+                MessageID = req.BuddyId, // hack: use BuddyId as MessageID so we know who it is
+                FromUserID = req.Buddy.Uid.ToString(),
                 MessageTypeID = 5,
                 MessageTypeName = "Buddy Request"
             });

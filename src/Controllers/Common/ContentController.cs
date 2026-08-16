@@ -1187,35 +1187,16 @@ public class ContentController : Controller {
     [VikingSession]
     public IActionResult GetBuddyList(Viking viking) {
         var relationships = ctx.BuddyRelationships
-            .Include(b => b.Viking)
             .Include(b => b.Buddy)
-            .Where(b => b.VikingId == viking.Id || b.BuddyId == viking.Id)
+            .Where(b => b.VikingId == viking.Id)
             .ToList();
 
         var buddies = new List<Buddy>();
         foreach (var rel in relationships) {
-            bool isOutgoing = rel.VikingId == viking.Id;
-            var friendViking = isOutgoing ? rel.Buddy : rel.Viking;
-
-            BuddyStatus displayStatus = BuddyStatus.Unknown;
-            if (rel.Status == BuddyStatus.Approved) {
-                displayStatus = BuddyStatus.Approved;
-            } else if (rel.Status == BuddyStatus.PendingApprovalFromOther) {
-                displayStatus = isOutgoing ? BuddyStatus.PendingApprovalFromOther : BuddyStatus.PendingApprovalFromSelf;
-            } else if (rel.Status == BuddyStatus.PendingApprovalFromSelf) {
-                displayStatus = isOutgoing ? BuddyStatus.PendingApprovalFromSelf : BuddyStatus.PendingApprovalFromOther;
-            } else if (rel.Status == BuddyStatus.BlockedByBoth) {
-                displayStatus = BuddyStatus.BlockedByBoth;
-            } else if (rel.Status == BuddyStatus.BlockedByOther) {
-                displayStatus = isOutgoing ? BuddyStatus.BlockedByOther : BuddyStatus.BlockedBySelf;
-            } else if (rel.Status == BuddyStatus.BlockedBySelf) {
-                displayStatus = isOutgoing ? BuddyStatus.BlockedBySelf : BuddyStatus.BlockedByOther;
-            }
-
             buddies.Add(new Buddy {
-                UserID = friendViking.Uid.ToString(),
-                DisplayName = friendViking.Name,
-                Status = displayStatus,
+                UserID = rel.Buddy.Uid.ToString(),
+                DisplayName = rel.Buddy.Name,
+                Status = rel.Status,
                 CreateDate = rel.CreateDate,
                 Online = true,
                 OnMobile = false,
@@ -1243,26 +1224,19 @@ public class ContentController : Controller {
             return Ok(new BuddyActionResult { Result = BuddyActionResultType.CannotAddSelf });
         }
 
-        var existing = ctx.BuddyRelationships.FirstOrDefault(b => 
-            (b.VikingId == viking.Id && b.BuddyId == buddyViking.Id) ||
-            (b.VikingId == buddyViking.Id && b.BuddyId == viking.Id));
+        var existing = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == viking.Id && b.BuddyId == buddyViking.Id);
 
         if (existing != null) {
             return Ok(new BuddyActionResult { Result = BuddyActionResultType.AlreadyInList });
         }
 
-        var relationship = new BuddyRelationship {
-            VikingId = viking.Id,
-            BuddyId = buddyViking.Id,
-            Status = BuddyStatus.PendingApprovalFromOther,
-            CreateDate = DateTime.UtcNow,
-            BestBuddy = false
-        };
+        var rel1 = new BuddyRelationship { VikingId = viking.Id, BuddyId = buddyViking.Id, Status = BuddyStatus.PendingApprovalFromOther, CreateDate = DateTime.UtcNow, BestBuddy = false };
+        var rel2 = new BuddyRelationship { VikingId = buddyViking.Id, BuddyId = viking.Id, Status = BuddyStatus.PendingApprovalFromSelf, CreateDate = DateTime.UtcNow, BestBuddy = false };
 
-        ctx.BuddyRelationships.Add(relationship);
+        ctx.BuddyRelationships.AddRange(rel1, rel2);
         ctx.SaveChanges();
 
-        return Ok(new BuddyActionResult { Result = BuddyActionResultType.Success, Status = relationship.Status, BuddyUserID = buddyViking.Uid.ToString() });
+        return Ok(new BuddyActionResult { Result = BuddyActionResultType.Success, Status = rel1.Status, BuddyUserID = buddyViking.Uid.ToString() });
     }
 
     [HttpGet, HttpPost]
@@ -1294,26 +1268,19 @@ public class ContentController : Controller {
             return Ok(new BuddyActionResult { Result = BuddyActionResultType.CannotAddSelf });
         }
 
-        var existing = ctx.BuddyRelationships.FirstOrDefault(b => 
-            (b.VikingId == viking.Id && b.BuddyId == buddyViking.Id) ||
-            (b.VikingId == buddyViking.Id && b.BuddyId == viking.Id));
+        var existing = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == viking.Id && b.BuddyId == buddyViking.Id);
 
         if (existing != null) {
             return Ok(new BuddyActionResult { Result = BuddyActionResultType.AlreadyInList });
         }
 
-        var relationship = new BuddyRelationship {
-            VikingId = viking.Id,
-            BuddyId = buddyViking.Id,
-            Status = BuddyStatus.PendingApprovalFromOther,
-            CreateDate = DateTime.UtcNow,
-            BestBuddy = false
-        };
+        var rel1 = new BuddyRelationship { VikingId = viking.Id, BuddyId = buddyViking.Id, Status = BuddyStatus.PendingApprovalFromOther, CreateDate = DateTime.UtcNow, BestBuddy = false };
+        var rel2 = new BuddyRelationship { VikingId = buddyViking.Id, BuddyId = viking.Id, Status = BuddyStatus.PendingApprovalFromSelf, CreateDate = DateTime.UtcNow, BestBuddy = false };
 
-        ctx.BuddyRelationships.Add(relationship);
+        ctx.BuddyRelationships.AddRange(rel1, rel2);
         ctx.SaveChanges();
 
-        return Ok(new BuddyActionResult { Result = BuddyActionResultType.Success, Status = relationship.Status, BuddyUserID = buddyViking.Uid.ToString() });
+        return Ok(new BuddyActionResult { Result = BuddyActionResultType.Success, Status = rel1.Status, BuddyUserID = buddyViking.Uid.ToString() });
     }
 
     [HttpPost]
@@ -1348,13 +1315,12 @@ public class ContentController : Controller {
         var buddy = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
         if (buddy == null) return Ok(false);
 
-        var rel = ctx.BuddyRelationships.FirstOrDefault(b => 
-            (b.VikingId == viking.Id && b.BuddyId == buddy.Id) || 
-            (b.VikingId == buddy.Id && b.BuddyId == viking.Id)
-        );
+        var rel1 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == viking.Id && b.BuddyId == buddy.Id);
+        var rel2 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == buddy.Id && b.BuddyId == viking.Id);
 
-        if (rel != null && rel.Status == BuddyStatus.PendingApprovalFromOther) {
-            rel.Status = BuddyStatus.Approved;
+        if (rel1 != null && rel2 != null && rel1.Status == BuddyStatus.PendingApprovalFromSelf) {
+            rel1.Status = BuddyStatus.Approved;
+            rel2.Status = BuddyStatus.Approved;
             ctx.SaveChanges();
             return Ok(true);
         }
@@ -1371,13 +1337,12 @@ public class ContentController : Controller {
         var buddy = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
         if (buddy == null) return Ok(false);
 
-        var rel = ctx.BuddyRelationships.FirstOrDefault(b => 
-            (b.VikingId == viking.Id && b.BuddyId == buddy.Id) || 
-            (b.VikingId == buddy.Id && b.BuddyId == viking.Id)
-        );
+        var rel1 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == viking.Id && b.BuddyId == buddy.Id);
+        var rel2 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == buddy.Id && b.BuddyId == viking.Id);
 
-        if (rel != null) {
-            ctx.BuddyRelationships.Remove(rel);
+        if (rel1 != null || rel2 != null) {
+            if (rel1 != null) ctx.BuddyRelationships.Remove(rel1);
+            if (rel2 != null) ctx.BuddyRelationships.Remove(rel2);
             ctx.SaveChanges();
             return Ok(true);
         }
@@ -1394,26 +1359,22 @@ public class ContentController : Controller {
         var buddy = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
         if (buddy == null) return Ok(false);
 
-        var rel = ctx.BuddyRelationships.FirstOrDefault(b => 
-            (b.VikingId == viking.Id && b.BuddyId == buddy.Id) || 
-            (b.VikingId == buddy.Id && b.BuddyId == viking.Id)
-        );
+        var rel1 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == viking.Id && b.BuddyId == buddy.Id);
+        var rel2 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == buddy.Id && b.BuddyId == viking.Id);
 
-        if (rel != null) {
-            ctx.BuddyRelationships.Remove(rel);
-            ctx.SaveChanges();
+        if (rel1 == null) {
+            rel1 = new BuddyRelationship { VikingId = viking.Id, BuddyId = buddy.Id, CreateDate = DateTime.UtcNow, BestBuddy = false };
+            ctx.BuddyRelationships.Add(rel1);
+        }
+        if (rel2 == null) {
+            rel2 = new BuddyRelationship { VikingId = buddy.Id, BuddyId = viking.Id, CreateDate = DateTime.UtcNow, BestBuddy = false };
+            ctx.BuddyRelationships.Add(rel2);
         }
 
-        var blockedRel = new BuddyRelationship {
-            VikingId = viking.Id,
-            BuddyId = buddy.Id,
-            Status = BuddyStatus.BlockedBySelf,
-            CreateDate = DateTime.UtcNow,
-            BestBuddy = false
-        };
-        ctx.BuddyRelationships.Add(blockedRel);
-        ctx.SaveChanges();
+        rel1.Status = BuddyStatus.BlockedBySelf;
+        rel2.Status = BuddyStatus.BlockedByOther;
         
+        ctx.SaveChanges();
         return Ok(true);
     }
 
