@@ -1218,6 +1218,36 @@ public class ContentController : Controller {
 
     [HttpPost]
     [Produces("application/xml")]
+    [Route("ContentWebService.asmx/GetBuddyLocation")]
+    [VikingSession]
+    public async Task<IActionResult> GetBuddyLocation(Viking viking, [FromForm] string buddyUserID) {
+        if (!Guid.TryParse(buddyUserID, out Guid buddyUid)) {
+            return Ok(new BuddyLocation());
+        }
+
+        using var client = new System.Net.Http.HttpClient();
+        client.Timeout = TimeSpan.FromSeconds(2);
+        try {
+            string response = await client.GetStringAsync($"http://localhost:9934/Admin/GetBuddyLocation?uid={buddyUid}");
+            if (!string.IsNullOrEmpty(response) && response.Contains('|')) {
+                string[] parts = response.Split('|');
+                return Ok(new BuddyLocation {
+                    UserID = buddyUid.ToString(),
+                    Server = "127.0.0.1",
+                    Zone = parts[0],
+                    Room = parts[1],
+                    MultiplayerID = int.Parse(parts[2]),
+                    ServerVersion = "S2X",
+                    AppName = "SchoolOfDragons"
+                });
+            }
+        } catch { }
+
+        return Ok(new BuddyLocation());
+    }
+
+    [HttpPost]
+    [Produces("application/xml")]
     [Route("ContentWebService.asmx/AddBuddy")]
     [VikingSession]
     public IActionResult AddBuddy(Viking viking, [FromForm] string buddyUserID) {
