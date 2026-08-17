@@ -59,4 +59,5 @@ public class Viking {
     public DateTime? BirthDate { get; set; }
     public Gender? Gender { get; set; }
     public uint? GameVersion { get; set; }
+    public bool IsOnline { get; set; } = false;
 }

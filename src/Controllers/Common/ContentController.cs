@@ -1198,12 +1198,22 @@ public class ContentController : Controller {
                 DisplayName = rel.Buddy.Name,
                 Status = rel.Status,
                 CreateDate = rel.CreateDate,
-                Online = true,
+                Online = rel.Buddy.IsOnline,
                 OnMobile = false,
                 BestBuddy = rel.BestBuddy
             });
         }
         return Ok(new BuddyList { Buddy = buddies.ToArray() });
+    }
+
+    private void PingMMOBuddyEvent(string targetUid, string fromUid, string cmdType) {
+        System.Threading.Tasks.Task.Run(async () => {
+            try {
+                using var client = new System.Net.Http.HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(2);
+                await client.GetAsync($"http://localhost:9934/Admin/SendBuddyEvent?uid={targetUid}&fromUid={fromUid}&cmdType={cmdType}");
+            } catch { }
+        });
     }
 
     [HttpPost]
@@ -1235,6 +1245,8 @@ public class ContentController : Controller {
 
         ctx.BuddyRelationships.AddRange(rel1, rel2);
         ctx.SaveChanges();
+        PingMMOBuddyEvent(viking.Uid.ToString(), buddyViking.Uid.ToString(), "1");
+        PingMMOBuddyEvent(buddyViking.Uid.ToString(), viking.Uid.ToString(), "1");
 
         return Ok(new BuddyActionResult { Result = BuddyActionResultType.Success, Status = rel1.Status, BuddyUserID = buddyViking.Uid.ToString() });
     }
@@ -1279,6 +1291,8 @@ public class ContentController : Controller {
 
         ctx.BuddyRelationships.AddRange(rel1, rel2);
         ctx.SaveChanges();
+        PingMMOBuddyEvent(viking.Uid.ToString(), buddyViking.Uid.ToString(), "1");
+        PingMMOBuddyEvent(buddyViking.Uid.ToString(), viking.Uid.ToString(), "1");
 
         return Ok(new BuddyActionResult { Result = BuddyActionResultType.Success, Status = rel1.Status, BuddyUserID = buddyViking.Uid.ToString() });
     }
@@ -1300,6 +1314,8 @@ public class ContentController : Controller {
         if (rel != null) {
             rel.BestBuddy = bestBuddy;
             ctx.SaveChanges();
+            PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), "1");
+            PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), "1");
             return Ok(true);
         }
         
@@ -1322,6 +1338,8 @@ public class ContentController : Controller {
             rel1.Status = BuddyStatus.Approved;
             rel2.Status = BuddyStatus.Approved;
             ctx.SaveChanges();
+            PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), "4");
+            PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), "4");
             return Ok(true);
         }
         
@@ -1344,6 +1362,8 @@ public class ContentController : Controller {
             if (rel1 != null) ctx.BuddyRelationships.Remove(rel1);
             if (rel2 != null) ctx.BuddyRelationships.Remove(rel2);
             ctx.SaveChanges();
+            PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), "2");
+            PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), "2");
             return Ok(true);
         }
         
@@ -1375,6 +1395,8 @@ public class ContentController : Controller {
         rel2.Status = BuddyStatus.BlockedByOther;
         
         ctx.SaveChanges();
+        PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), "3");
+        PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), "3");
         return Ok(true);
     }
 
@@ -2640,5 +2662,17 @@ public class ContentController : Controller {
         return inventoryService.AddItemsToInventoryBulkAndGetResponse(
             viking, inventoryItemsToAdd, itemsToSendBack, achievementService.GetUserCurrency(viking)
         );
+    }
+
+    [HttpPost]
+    [Route("Internal/SetOnlineStatus")]
+    public IActionResult SetOnlineStatus([FromForm] string vikingId, [FromForm] bool isOnline) {
+        if (!Guid.TryParse(vikingId, out Guid uid)) return BadRequest();
+        var viking = ctx.Vikings.FirstOrDefault(v => v.Uid == uid);
+        if (viking != null) {
+            viking.IsOnline = isOnline;
+            ctx.SaveChanges();
+        }
+        return Ok();
     }
 }
