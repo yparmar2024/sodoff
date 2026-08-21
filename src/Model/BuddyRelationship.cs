@@ -1,4 +1,4 @@
-using sodoff.Schema;
+﻿using sodoff.Schema;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
