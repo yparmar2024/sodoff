@@ -161,7 +161,10 @@ public class FriendService {
                 UserID = buddyUser.Uid.ToString(),
                 DisplayName = buddyUser.Name,
                 Status = mappedStatus,
-                BestBuddy = bestBuddy
+                BestBuddy = bestBuddy,
+                Online = buddyUser.IsOnline,
+                OnMobile = false,
+                CreateDate = rel.CreateDate
             });
         }
         return buddies;

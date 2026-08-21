@@ -1196,9 +1196,12 @@ public class ContentController : Controller {
     private void PingMMOBuddyEvent(string targetUid, string fromUid, string cmdType) {
         System.Threading.Tasks.Task.Run(async () => {
             try {
-                using var client = new System.Net.Http.HttpClient();
-                client.Timeout = TimeSpan.FromSeconds(2);
-                await client.GetAsync($"http://localhost:9934/Admin/SendBuddyEvent?uid={targetUid}&fromUid={fromUid}&cmdType={cmdType}");
+                using var client = new System.Net.Sockets.TcpClient();
+                await client.ConnectAsync("127.0.0.1", 9934);
+                using var stream = client.GetStream();
+                using var writer = new System.IO.StreamWriter(stream);
+                await writer.WriteLineAsync($"SBE|{targetUid}|{fromUid}|{cmdType}");
+                await writer.FlushAsync();
             } catch { }
         });
     }
