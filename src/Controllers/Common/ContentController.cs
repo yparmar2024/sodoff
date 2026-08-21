@@ -1219,38 +1219,51 @@ public class ContentController : Controller {
         if (buddyViking == null) {
             return Ok(new BuddyLocation());
         }
-
-        /* 
-         * OLD MMO SERVER BEHAVIOR:
-         * Previously, the API made an HTTP request to the MMO Server (`http://localhost:9934/Admin/GetBuddyLocation`) 
-         * which then returned the server IP, the zone, and the room.
-         * 
-         * NEW BEHAVIOR:
-         * Because SoDOff is a private emulator, we only have one server and one zone anyway. The only variable is the Room.
-         * Whenever a player walks into a new room, their game client automatically updates the 'sceneName' Pair 
-         * in the SQLite database. So instead of running an HTTP web server inside the MMO Server, we can simply 
-         * query the SQLite database directly for the 'sceneName' Pair, avoiding network hops and simplifying the MMO server.
-         */
         
         const string DefaultServerIp = "127.0.0.1";
         const string DefaultServerVersion = "S2X";
         const string DefaultAppName = "SchoolOfDragons";
 
         string roomName = "Unknown";
-        var roomPair = ctx.Pairs
-            .Include(p => p.PairData)
-            .FirstOrDefault(p => p.PairData.VikingId == buddyViking.Id && p.Key == "sceneName");
+        string roomId = "0";
+        int multiplayerId = 0;
 
-        if (roomPair != null && !string.IsNullOrEmpty(roomPair.Value)) {
-            roomName = roomPair.Value;
+        // NEW BEHAVIOR: Use raw TCP pipe to query the MMO server for the exact MultiplayerID and Room instance required for teleportation.
+        try {
+            using var client = new System.Net.Sockets.TcpClient();
+            client.Connect("127.0.0.1", 9934);
+            using var stream = client.GetStream();
+            using var writer = new System.IO.StreamWriter(stream) { AutoFlush = true };
+            writer.WriteLine($"GBL|{buddyUid}");
+            
+            using var reader = new System.IO.StreamReader(stream);
+            string? response = reader.ReadLine();
+            if (!string.IsNullOrEmpty(response) && response.Contains('|')) {
+                string[] parts = response.Split('|');
+                roomName = parts[0];
+                roomId = parts[1];
+                multiplayerId = int.Parse(parts[2]);
+            }
+        } catch { }
+
+        // Fallback to SQLite Pairs if MMO Server isn't available or friend is not in a multiplayer lobby
+        if (roomName == "Unknown" || string.IsNullOrEmpty(roomName)) {
+            var roomPair = ctx.Pairs
+                .Include(p => p.PairData)
+                .FirstOrDefault(p => p.PairData.VikingId == buddyViking.Id && p.Key == "sceneName");
+
+            if (roomPair != null && !string.IsNullOrEmpty(roomPair.Value)) {
+                roomName = roomPair.Value;
+                roomId = roomName; // Best guess fallback
+            }
         }
 
         return Ok(new BuddyLocation {
             UserID = buddyUid.ToString(),
             Server = DefaultServerIp,
             Zone = roomName,
-            Room = roomName,
-            MultiplayerID = 0,
+            Room = roomId,
+            MultiplayerID = multiplayerId,
             ServerVersion = DefaultServerVersion,
             AppName = DefaultAppName
         });
