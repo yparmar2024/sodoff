@@ -1228,7 +1228,7 @@ public class ContentController : Controller {
         string roomId = "0";
         int multiplayerId = 0;
 
-        // NEW BEHAVIOR: Use raw TCP pipe to query the MMO server for the exact MultiplayerID and Room instance required for teleportation.
+        // Use raw TCP pipe to query the MMO server for the exact MultiplayerID and Room instance required for teleportation.
         try {
             using var client = new System.Net.Sockets.TcpClient();
             client.Connect("127.0.0.1", 9934);
