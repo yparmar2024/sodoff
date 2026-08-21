@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using sodoff.Model;
 using sodoff.Schema;
@@ -156,20 +156,27 @@ public class MessagingController : Controller
         var messages = new List<MessageInfo>();
 
         // 1. Buddy Requests
+        const int BuddyRequestMessageTypeId = 5;
+        const string BuddyRequestMessageTypeName = "Buddy Request";
+
         var buddyReqs = ctx.BuddyRelationships
-            .Include(b => b.Buddy)
-            .Where(b => b.VikingId == viking.Id && b.Status == BuddyStatus.PendingApprovalFromSelf)
+            .Include(b => b.Viking1)
+            .Include(b => b.Viking2)
+            .Where(b => (b.VikingId1 == viking.Id || b.VikingId2 == viking.Id) && b.Status == BuddyStatus.PendingApprovalFromOther && b.InitiatorId != viking.Id)
             .ToList();
             
         foreach (var req in buddyReqs) {
+            bool isViking1 = req.VikingId1 == viking.Id;
+            var buddyUser = isViking1 ? req.Viking2 : req.Viking1;
+
             messages.Add(new MessageInfo {
-                MessageID = req.BuddyId, // hack: use BuddyId as MessageID so we know who it is
-                UserMessageQueueID = req.BuddyId,
-                FromUserID = req.Buddy.Uid.ToString(),
-                MessageTypeID = 5,
-                MessageTypeName = "Buddy Request",
-                MemberMessage = $"[[Line1]]=[[{req.Buddy.Name} wants to be your buddy!]]",
-                NonMemberMessage = $"[[Line1]]=[[{req.Buddy.Name} wants to be your buddy!]]"
+                MessageID = buddyUser.Id, // hack: use BuddyId as MessageID so we know who it is
+                UserMessageQueueID = buddyUser.Id,
+                FromUserID = buddyUser.Uid.ToString(),
+                MessageTypeID = BuddyRequestMessageTypeId,
+                MessageTypeName = BuddyRequestMessageTypeName,
+                MemberMessage = $"[[Line1]]=[[{buddyUser.Name} wants to be your buddy!]]",
+                NonMemberMessage = $"[[Line1]]=[[{buddyUser.Name} wants to be your buddy!]]"
             });
         }
 

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using sodoff.Configuration;
 using System.Text.Json;
@@ -75,13 +75,13 @@ public class DBContext : DbContext {
     }
 
     protected override void OnModelCreating(ModelBuilder builder) {
-        builder.Entity<BuddyRelationship>().HasKey(e => new { e.VikingId, e.BuddyId });
-        builder.Entity<BuddyRelationship>().HasOne(e => e.Viking)
-            .WithMany(v => v.BuddyRelationships)
-            .HasForeignKey(e => e.VikingId);
-        builder.Entity<BuddyRelationship>().HasOne(e => e.Buddy)
+        builder.Entity<BuddyRelationship>().HasKey(e => new { e.VikingId1, e.VikingId2 });
+        builder.Entity<BuddyRelationship>().HasOne(e => e.Viking1)
             .WithMany()
-            .HasForeignKey(e => e.BuddyId);
+            .HasForeignKey(e => e.VikingId1);
+        builder.Entity<BuddyRelationship>().HasOne(e => e.Viking2)
+            .WithMany()
+            .HasForeignKey(e => e.VikingId2);
 
         builder.Entity<GroupMember>().HasKey(["VikingID", "GroupID"]);
         builder.Entity<GroupJoinRequest>().HasKey(["VikingID", "GroupID"]);

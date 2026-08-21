@@ -23,6 +23,7 @@ public class ContentController : Controller {
     private GameDataService gameDataService;
     private XmlDataService xmlDataService;
     private NeighborhoodService neighborhoodService;
+    private FriendService friendService;
     private Random random = new Random();
     private readonly IOptions<ApiServerConfig> config;
     
@@ -38,6 +39,7 @@ public class ContentController : Controller {
         GameDataService gameDataService,
         XmlDataService xmlDataService,
         NeighborhoodService neighborhoodService,
+        FriendService friendService,
         IOptions<ApiServerConfig> config
     ) {
         this.ctx = ctx;
@@ -51,6 +53,7 @@ public class ContentController : Controller {
         this.gameDataService = gameDataService;
         this.xmlDataService = xmlDataService;
         this.neighborhoodService = neighborhoodService;
+        this.friendService = friendService;
         this.config = config;
     }
 
@@ -1186,23 +1189,7 @@ public class ContentController : Controller {
     [Route("ContentWebService.asmx/GetBuddyList")]
     [VikingSession]
     public IActionResult GetBuddyList(Viking viking) {
-        var relationships = ctx.BuddyRelationships
-            .Include(b => b.Buddy)
-            .Where(b => b.VikingId == viking.Id)
-            .ToList();
-
-        var buddies = new List<Buddy>();
-        foreach (var rel in relationships) {
-            buddies.Add(new Buddy {
-                UserID = rel.Buddy.Uid.ToString(),
-                DisplayName = rel.Buddy.Name,
-                Status = rel.Status,
-                CreateDate = rel.CreateDate,
-                Online = rel.Buddy.IsOnline,
-                OnMobile = false,
-                BestBuddy = rel.BestBuddy
-            });
-        }
+        var buddies = friendService.GetBuddyListForViking(viking);
         return Ok(new BuddyList { Buddy = buddies.ToArray() });
     }
 
@@ -1220,30 +1207,50 @@ public class ContentController : Controller {
     [Produces("application/xml")]
     [Route("ContentWebService.asmx/GetBuddyLocation")]
     [VikingSession]
-    public async Task<IActionResult> GetBuddyLocation(Viking viking, [FromForm] string buddyUserID) {
+    public IActionResult GetBuddyLocation(Viking viking, [FromForm] string buddyUserID) {
         if (!Guid.TryParse(buddyUserID, out Guid buddyUid)) {
             return Ok(new BuddyLocation());
         }
 
-        using var client = new System.Net.Http.HttpClient();
-        client.Timeout = TimeSpan.FromSeconds(2);
-        try {
-            string response = await client.GetStringAsync($"http://localhost:9934/Admin/GetBuddyLocation?uid={buddyUid}");
-            if (!string.IsNullOrEmpty(response) && response.Contains('|')) {
-                string[] parts = response.Split('|');
-                return Ok(new BuddyLocation {
-                    UserID = buddyUid.ToString(),
-                    Server = "127.0.0.1",
-                    Zone = parts[0],
-                    Room = parts[1],
-                    MultiplayerID = int.Parse(parts[2]),
-                    ServerVersion = "S2X",
-                    AppName = "SchoolOfDragons"
-                });
-            }
-        } catch { }
+        var buddyViking = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
+        if (buddyViking == null) {
+            return Ok(new BuddyLocation());
+        }
 
-        return Ok(new BuddyLocation());
+        /* 
+         * OLD MMO SERVER BEHAVIOR:
+         * Previously, the API made an HTTP request to the MMO Server (`http://localhost:9934/Admin/GetBuddyLocation`) 
+         * which then returned the server IP, the zone, and the room.
+         * 
+         * NEW BEHAVIOR:
+         * Because SoDOff is a private emulator, we only have one server and one zone anyway. The only variable is the Room.
+         * Whenever a player walks into a new room, their game client automatically updates the 'sceneName' Pair 
+         * in the SQLite database. So instead of running an HTTP web server inside the MMO Server, we can simply 
+         * query the SQLite database directly for the 'sceneName' Pair, avoiding network hops and simplifying the MMO server.
+         */
+        
+        const string DefaultServerIp = "127.0.0.1";
+        const string DefaultServerVersion = "S2X";
+        const string DefaultAppName = "SchoolOfDragons";
+
+        string roomName = "Unknown";
+        var roomPair = ctx.Pairs
+            .Include(p => p.PairData)
+            .FirstOrDefault(p => p.PairData.VikingId == buddyViking.Id && p.Key == "sceneName");
+
+        if (roomPair != null && !string.IsNullOrEmpty(roomPair.Value)) {
+            roomName = roomPair.Value;
+        }
+
+        return Ok(new BuddyLocation {
+            UserID = buddyUid.ToString(),
+            Server = DefaultServerIp,
+            Zone = roomName,
+            Room = roomName,
+            MultiplayerID = 0,
+            ServerVersion = DefaultServerVersion,
+            AppName = DefaultAppName
+        });
     }
 
     [HttpPost]
@@ -1260,25 +1267,13 @@ public class ContentController : Controller {
             return Ok(new BuddyActionResult { Result = BuddyActionResultType.Unknown });
         }
 
-        if (buddyViking.Id == viking.Id) {
-            return Ok(new BuddyActionResult { Result = BuddyActionResultType.CannotAddSelf });
+        var result = friendService.AddBuddy(viking, buddyViking);
+        if (result.Result == BuddyActionResultType.Success) {
+            PingMMOBuddyEvent(viking.Uid.ToString(), buddyViking.Uid.ToString(), FriendService.MMOEventAddBuddy);
+            PingMMOBuddyEvent(buddyViking.Uid.ToString(), viking.Uid.ToString(), FriendService.MMOEventAddBuddy);
         }
 
-        var existing = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == viking.Id && b.BuddyId == buddyViking.Id);
-
-        if (existing != null) {
-            return Ok(new BuddyActionResult { Result = BuddyActionResultType.AlreadyInList });
-        }
-
-        var rel1 = new BuddyRelationship { VikingId = viking.Id, BuddyId = buddyViking.Id, Status = BuddyStatus.PendingApprovalFromOther, CreateDate = DateTime.UtcNow, BestBuddy = false };
-        var rel2 = new BuddyRelationship { VikingId = buddyViking.Id, BuddyId = viking.Id, Status = BuddyStatus.PendingApprovalFromSelf, CreateDate = DateTime.UtcNow, BestBuddy = false };
-
-        ctx.BuddyRelationships.AddRange(rel1, rel2);
-        ctx.SaveChanges();
-        PingMMOBuddyEvent(viking.Uid.ToString(), buddyViking.Uid.ToString(), "1");
-        PingMMOBuddyEvent(buddyViking.Uid.ToString(), viking.Uid.ToString(), "1");
-
-        return Ok(new BuddyActionResult { Result = BuddyActionResultType.Success, Status = rel1.Status, BuddyUserID = buddyViking.Uid.ToString() });
+        return Ok(result);
     }
 
     [HttpGet, HttpPost]
@@ -1315,25 +1310,13 @@ public class ContentController : Controller {
             return Ok(new BuddyActionResult { Result = BuddyActionResultType.InvalidFriendCode });
         }
 
-        if (buddyViking.Id == viking.Id) {
-            return Ok(new BuddyActionResult { Result = BuddyActionResultType.CannotAddSelf });
+        var result = friendService.AddBuddy(viking, buddyViking);
+        if (result.Result == BuddyActionResultType.Success) {
+            PingMMOBuddyEvent(viking.Uid.ToString(), buddyViking.Uid.ToString(), FriendService.MMOEventAddBuddy);
+            PingMMOBuddyEvent(buddyViking.Uid.ToString(), viking.Uid.ToString(), FriendService.MMOEventAddBuddy);
         }
 
-        var existing = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == viking.Id && b.BuddyId == buddyViking.Id);
-
-        if (existing != null) {
-            return Ok(new BuddyActionResult { Result = BuddyActionResultType.AlreadyInList });
-        }
-
-        var rel1 = new BuddyRelationship { VikingId = viking.Id, BuddyId = buddyViking.Id, Status = BuddyStatus.PendingApprovalFromOther, CreateDate = DateTime.UtcNow, BestBuddy = false };
-        var rel2 = new BuddyRelationship { VikingId = buddyViking.Id, BuddyId = viking.Id, Status = BuddyStatus.PendingApprovalFromSelf, CreateDate = DateTime.UtcNow, BestBuddy = false };
-
-        ctx.BuddyRelationships.AddRange(rel1, rel2);
-        ctx.SaveChanges();
-        PingMMOBuddyEvent(viking.Uid.ToString(), buddyViking.Uid.ToString(), "1");
-        PingMMOBuddyEvent(buddyViking.Uid.ToString(), viking.Uid.ToString(), "1");
-
-        return Ok(new BuddyActionResult { Result = BuddyActionResultType.Success, Status = rel1.Status, BuddyUserID = buddyViking.Uid.ToString() });
+        return Ok(result);
     }
 
     [HttpPost]
@@ -1345,16 +1328,9 @@ public class ContentController : Controller {
         var buddy = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
         if (buddy == null) return Ok(false);
 
-        var rel = ctx.BuddyRelationships.FirstOrDefault(b => 
-            (b.VikingId == viking.Id && b.BuddyId == buddy.Id) || 
-            (b.VikingId == buddy.Id && b.BuddyId == viking.Id)
-        );
-
-        if (rel != null) {
-            rel.BestBuddy = bestBuddy;
-            ctx.SaveChanges();
-            PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), "1");
-            PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), "1");
+        if (friendService.UpdateBestBuddy(viking, buddy, bestBuddy)) {
+            PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), FriendService.MMOEventAddBuddy);
+            PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), FriendService.MMOEventAddBuddy);
             return Ok(true);
         }
         
@@ -1370,15 +1346,9 @@ public class ContentController : Controller {
         var buddy = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
         if (buddy == null) return Ok(false);
 
-        var rel1 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == viking.Id && b.BuddyId == buddy.Id);
-        var rel2 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == buddy.Id && b.BuddyId == viking.Id);
-
-        if (rel1 != null && rel2 != null && rel1.Status == BuddyStatus.PendingApprovalFromSelf) {
-            rel1.Status = BuddyStatus.Approved;
-            rel2.Status = BuddyStatus.Approved;
-            ctx.SaveChanges();
-            PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), "4");
-            PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), "4");
+        if (friendService.ApproveBuddy(viking, buddy)) {
+            PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), FriendService.MMOEventApproveBuddy);
+            PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), FriendService.MMOEventApproveBuddy);
             return Ok(true);
         }
         
@@ -1394,15 +1364,9 @@ public class ContentController : Controller {
         var buddy = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
         if (buddy == null) return Ok(false);
 
-        var rel1 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == viking.Id && b.BuddyId == buddy.Id);
-        var rel2 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == buddy.Id && b.BuddyId == viking.Id);
-
-        if (rel1 != null || rel2 != null) {
-            if (rel1 != null) ctx.BuddyRelationships.Remove(rel1);
-            if (rel2 != null) ctx.BuddyRelationships.Remove(rel2);
-            ctx.SaveChanges();
-            PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), "2");
-            PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), "2");
+        if (friendService.RemoveBuddy(viking, buddy)) {
+            PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), FriendService.MMOEventRemoveBuddy);
+            PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), FriendService.MMOEventRemoveBuddy);
             return Ok(true);
         }
         
@@ -1418,25 +1382,12 @@ public class ContentController : Controller {
         var buddy = ctx.Vikings.FirstOrDefault(v => v.Uid == buddyUid);
         if (buddy == null) return Ok(false);
 
-        var rel1 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == viking.Id && b.BuddyId == buddy.Id);
-        var rel2 = ctx.BuddyRelationships.FirstOrDefault(b => b.VikingId == buddy.Id && b.BuddyId == viking.Id);
-
-        if (rel1 == null) {
-            rel1 = new BuddyRelationship { VikingId = viking.Id, BuddyId = buddy.Id, CreateDate = DateTime.UtcNow, BestBuddy = false };
-            ctx.BuddyRelationships.Add(rel1);
+        if (friendService.BlockBuddy(viking, buddy)) {
+            PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), FriendService.MMOEventBlockBuddy);
+            PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), FriendService.MMOEventBlockBuddy);
+            return Ok(true);
         }
-        if (rel2 == null) {
-            rel2 = new BuddyRelationship { VikingId = buddy.Id, BuddyId = viking.Id, CreateDate = DateTime.UtcNow, BestBuddy = false };
-            ctx.BuddyRelationships.Add(rel2);
-        }
-
-        rel1.Status = BuddyStatus.BlockedBySelf;
-        rel2.Status = BuddyStatus.BlockedByOther;
-        
-        ctx.SaveChanges();
-        PingMMOBuddyEvent(viking.Uid.ToString(), buddy.Uid.ToString(), "3");
-        PingMMOBuddyEvent(buddy.Uid.ToString(), viking.Uid.ToString(), "3");
-        return Ok(true);
+        return Ok(false);
     }
 
     [HttpPost]
