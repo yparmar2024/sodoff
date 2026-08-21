@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 using sodoff.Attributes;
@@ -1286,9 +1286,18 @@ public class ContentController : Controller {
     [Route("ContentWebService.asmx/GetFriendCode")]
     [VikingSession]
     public IActionResult GetFriendCode(Viking viking) {
-        // Friend code is the first 6 chars of the Guid uppercase
-        string friendCode = viking.Uid.ToString().Substring(0, 6).ToUpper();
-        return Ok(friendCode);
+        if (string.IsNullOrEmpty(viking.FriendCode)) {
+            const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            var random = new Random();
+            string newCode;
+            do {
+                newCode = new string(Enumerable.Repeat(chars, 6).Select(s => s[random.Next(s.Length)]).ToArray());
+            } while (ctx.Vikings.Any(v => v.FriendCode == newCode));
+            
+            viking.FriendCode = newCode;
+            ctx.SaveChanges();
+        }
+        return Ok(viking.FriendCode);
     }
 
     [HttpPost]
@@ -1300,8 +1309,8 @@ public class ContentController : Controller {
             return Ok(new BuddyActionResult { Result = BuddyActionResultType.InvalidFriendCode });
         }
 
-        // Find the buddy whose Uid starts with the friendCode
-        var buddyViking = ctx.Vikings.ToList().FirstOrDefault(v => v.Uid.ToString().StartsWith(friendCode.ToLower()));
+        string normalizedCode = friendCode.ToUpper();
+        var buddyViking = ctx.Vikings.FirstOrDefault(v => v.FriendCode == normalizedCode);
         if (buddyViking == null) {
             return Ok(new BuddyActionResult { Result = BuddyActionResultType.InvalidFriendCode });
         }

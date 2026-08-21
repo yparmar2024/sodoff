@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 using sodoff.Schema;
@@ -6,6 +6,7 @@ using sodoff.Schema;
 namespace sodoff.Model;
 
 [Index(nameof(Uid), IsUnique = true)]
+[Index(nameof(FriendCode), IsUnique = true)]
 public class Viking {
     [Key]
     [JsonIgnore]
@@ -60,4 +61,7 @@ public class Viking {
     public Gender? Gender { get; set; }
     public uint? GameVersion { get; set; }
     public bool IsOnline { get; set; } = false;
+    
+    [MaxLength(6)]
+    public string? FriendCode { get; set; }
 }
