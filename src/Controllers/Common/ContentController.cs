@@ -1408,6 +1408,16 @@ public class ContentController : Controller {
 
     [HttpPost]
     [Produces("application/xml")]
+    [Route("ContentWebService.asmx/InviteBuddy")]
+    [VikingSession]
+    public IActionResult InviteBuddy([FromForm] string buddyUserID, Viking viking) {
+        if (!Guid.TryParse(buddyUserID, out Guid buddyUid)) return Ok(false);
+        PingMMOBuddyEvent(buddyUid.ToString(), viking.Uid.ToString(), "5");
+        return Ok(true);
+    }
+
+    [HttpPost]
+    [Produces("application/xml")]
     [Route("/ContentWebService.asmx/RedeemItems")]
     [VikingSession]
     public IActionResult RedeemItems(Viking viking, [FromForm] string request) {
